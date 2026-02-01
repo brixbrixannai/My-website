@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Drop by Drop | charity: water</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="assets/charitywater_favicon.svg" type="image/svg+xml">
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #ffffff;
+      color: #111;
+      text-align: center;
+      display: flex;
+      min-height: 100vh;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    header {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    header img {
+      max-width: 260px;
+      display: block;
+      margin: 0 auto;
+    }
+
+    .title-icon {
+      width: 28px;
+      height: 28px;
+    }
+
+    h1 {
+      margin: 10px 0 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+    }
+
+    #game {
+      margin: 30px auto;
+      width: 320px;
+      height: 420px;
+      border-radius: 16px;
+      background: #f4f9ff;
+      position: relative;
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    .drop {
+      width: 24px;
+      height: 24px;
+      position: absolute;
+      background: url('assets/jerry_can_black.svg') no-repeat center / contain;
+      animation: fall linear forwards;
+    }
+
+    @keyframes fall {
+      from { top: -20px; }
+      to { top: 420px; }
+    }
+
+    #bucket {
+      width: 64px;
+      height: 64px;
+      position: absolute;
+      bottom: 10px;
+      left: 128px;
+      background: url('assets/jerry_can_yellow.svg') no-repeat center / contain;
+    }
+
+    #score, #timer {
+      font-size: 16px;
+      margin: 4px 0;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 12px 24px;
+      border-radius: 24px;
+      border: none;
+      background: #ffd400;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      max-width: 320px;
+    }
+
+    .modal-content img {
+      max-width: 200px;
+      margin-bottom: 12px;
+    }
+
+    footer {
+      margin-top: 24px;
+      padding: 16px 8px;
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .donate-btn {
+      background: #0bb0ff;
+      color: white;
+      padding: 10px 16px;
+      border-radius: 20px;
+      border: none;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <img src="assets/charitywater_logo_horizontal_BlackText.svg" alt="charity: water" />
+</header>
+
+<h1><img src="assets/jerry_can_yellow.svg" class="title-icon" /> Drop by Drop</h1>
+<p>Catch clean water. Every drop counts.</p>
+<p id="score">Score: 0</p>
+<p id="timer">Time: 20</p>
+
+<div id="game">
+  <div id="bucket"></div>
+</div>
+
+<button onclick="startGame()">Start Game</button>
+
+<div class="modal" id="endModal">
+  <div class="modal-content">
+    <img src="assets/charitywater_logo_horizontal_BlackText.svg" alt="charity water" />
+    <h2>Game Over 💧</h2>
+    <p id="finalScore"></p>
+    <p>771 million people still lack access to clean water.</p>
+    <button onclick="closeModal()">Play Again</button>
+  </div>
+</div>
+
+<script>
+ 
+  const game = document.getElementById("game");
+  const bucket = document.getElementById("bucket");
+  const scoreEl = document.getElementById("score");
+  const timerEl = document.getElementById("timer");
+  const modal = document.getElementById("endModal");
+  const finalScoreEl = document.getElementById("finalScore");
+
+  let score = 0;
+  let timeLeft = 20;
+  let gameInterval;
+  let dropSpeed = 3000;
+
+  // WebAudio for collect and game-over sounds
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = new AudioContextClass();
+  // Helper: generate samples for a sine chirp
+  function generateChirp(durationSec, startFreq, endFreq, sampleRate = 44100) {
+    const length = Math.floor(durationSec * sampleRate);
+    const samples = new Float32Array(length);
+    let phase = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      const freq = startFreq * Math.pow(endFreq / startFreq, t);
+      samples[i] = Math.sin(phase);
+      phase += 2 * Math.PI * freq / sampleRate;
+    }
+    return samples;
+  }
+
+  // Helper: generate triangle wave with falling frequency
+  function generateDescendingTriangle(durationSec, startFreq, endFreq, sampleRate = 44100) {
+    const length = Math.floor(durationSec * sampleRate);
+    const samples = new Float32Array(length);
+    let phase = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      const freq = startFreq * Math.pow(endFreq / startFreq, t);
+      const cyclePos = (phase / (2 * Math.PI)) % 1;
+      const tri = 2 * Math.abs(2 * (cyclePos - Math.floor(cyclePos + 0.5))) - 1;
+      samples[i] = tri * 0.6;
+      phase += 2 * Math.PI * freq / sampleRate;
+    }
+    return samples;
+  }
+
+  // Encode Float32Array samples to WAV Blob (16-bit PCM)
+  function encodeWAV(samples, sampleRate = 44100) {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    /* RIFF identifier */ writeString(view, 0, 'RIFF');
+    /* file length */ view.setUint32(4, 36 + samples.length * 2, true);
+    /* RIFF type */ writeString(view, 8, 'WAVE');
+    /* format chunk identifier */ writeString(view, 12, 'fmt ');
+    /* format chunk length */ view.setUint32(16, 16, true);
+    /* sample format (raw) */ view.setUint16(20, 1, true);
+    /* channel count */ view.setUint16(22, 1, true);
+    /* sample rate */ view.setUint32(24, sampleRate, true);
+    /* byte rate (sampleRate * blockAlign) */ view.setUint32(28, sampleRate * 2, true);
+    /* block align (channel count * bytes per sample) */ view.setUint16(32, 2, true);
+    /* bits per sample */ view.setUint16(34, 16, true);
+    /* data chunk identifier */ writeString(view, 36, 'data');
+    /* data chunk length */ view.setUint32(40, samples.length * 2, true);
+
+    // write the PCM samples
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      let s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  // Create downloadable audio blobs and URLs (deferred until game start)
+  // Generate a more water-like drop: short chirp + noise burst with fast decay
+  function generateWaterDrop(durationSec = 0.12, sampleRate = 44100) {
+    const length = Math.floor(durationSec * sampleRate);
+    const samples = new Float32Array(length);
+    let phase = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      // frequency falls slightly
+      const freq = 1800 * Math.pow(600 / 1800, t);
+      // sine component
+      const sine = Math.sin(phase);
+      // short noise burst (windowed)
+      const noise = (Math.random() * 2 - 1) * Math.exp(-6 * t);
+      // quick exponential amplitude decay
+      const env = Math.exp(-8 * t);
+      samples[i] = (sine * 0.6 + noise * 0.35) * env;
+      phase += 2 * Math.PI * freq / sampleRate;
+    }
+    return samples;
+  }
+  // lazy audio assets (created on first game start)
+  let collectUrl = null;
+  let gameOverUrl = null;
+  let dlCollect = null;
+  let dlGameOver = null;
+
+  function initAudioFiles() {
+    if (collectUrl && gameOverUrl) return;
+    const collectSamples = generateWaterDrop(0.12);
+    const collectBlob = encodeWAV(collectSamples);
+    collectUrl = URL.createObjectURL(collectBlob);
+
+    const gameOverSamples = generateDescendingTriangle(0.8, 700, 160);
+    const gameOverBlob = encodeWAV(gameOverSamples);
+    gameOverUrl = URL.createObjectURL(gameOverBlob);
+
+    // Create download links (hidden until start)
+    dlCollect = document.createElement('a');
+    dlCollect.href = collectUrl;
+    dlCollect.download = 'collect.wav';
+    dlCollect.style.display = 'none';
+    document.body.appendChild(dlCollect);
+
+    dlGameOver = document.createElement('a');
+    dlGameOver.href = gameOverUrl;
+    dlGameOver.download = 'gameover.wav';
+    dlGameOver.style.display = 'none';
+    document.body.appendChild(dlGameOver);
+  }
+
+  function playCollectSound() {
+    try {
+      if (collectUrl) {
+        const a = new Audio(collectUrl);
+        a.volume = 0.9;
+        a.play().catch(() => {});
+        return;
+      }
+    } catch (e) {
+      // fallthrough to oscillator
+    }
+    // fallback to oscillator
+    try {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(900, audioCtx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(1400, audioCtx.currentTime + 0.08);
+      g.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + 0.2);
+    } catch (e) { }
+  }
+
+  function playGameOverSound() {
+    try {
+      if (gameOverUrl) {
+        const a = new Audio(gameOverUrl);
+        a.volume = 0.9;
+        a.play().catch(() => {});
+        return;
+      }
+    } catch (e) {
+      // fallthrough to oscillator
+    }
+    try {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(700, audioCtx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(160, audioCtx.currentTime + 0.6);
+      g.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.14, audioCtx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start();
+      o.stop(audioCtx.currentTime + 0.8);
+    } catch (e) { }
+  }
+
+  function moveBucket(clientX) {
+    const rect = game.getBoundingClientRect();
+    let x = clientX - rect.left - bucket.offsetWidth / 2;
+    x = Math.max(0, Math.min(x, rect.width - bucket.offsetWidth));
+    bucket.style.left = x + "px";
+  }
+
+  document.addEventListener("mousemove", e => moveBucket(e.clientX));
+  document.addEventListener("touchmove", e => {
+    moveBucket(e.touches[0].clientX);
+  }, { passive: false });
+
+  function startGame() {
+    score = 0;
+    timeLeft = 20;
+    dropSpeed = 3000;
+    scoreEl.textContent = "Score: 0";
+    timerEl.textContent = "Time: 20";
+    modal.style.display = "none";
+
+    clearInterval(gameInterval);
+    gameInterval = setInterval(createDrop, 700);
+
+    // Ensure audio context is resumed after a user gesture
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+
+    // Initialize audio files lazily to avoid blocking page load
+    initAudioFiles();
+
+    // Expose download links for the generated audio files (user can right-click save)
+    if (dlCollect) dlCollect.style.display = 'inline-block';
+    if (dlGameOver) dlGameOver.style.display = 'inline-block';
+
+    const timerInterval = setInterval(() => {
+      timeLeft--;
+      timerEl.textContent = `Time: ${timeLeft}`;
+      dropSpeed -= 100;
+
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        clearInterval(gameInterval);
+        endGame();
+      }
+    }, 1000);
+  }
+
+  function createDrop() {
+    const drop = document.createElement("div");
+    drop.className = "drop";
+    drop.style.left = Math.random() * 300 + "px";
+    drop.style.animationDuration = dropSpeed + "ms";
+    game.appendChild(drop);
+
+    const checkHit = setInterval(() => {
+      const dropRect = drop.getBoundingClientRect();
+      const bucketRect = bucket.getBoundingClientRect();
+
+      if (
+        dropRect.bottom >= bucketRect.top &&
+        dropRect.left <= bucketRect.right &&
+        dropRect.right >= bucketRect.left
+      ) {
+        score++;
+        scoreEl.textContent = `Score: ${score}`;
+        playCollectSound();
+        drop.remove();
+        clearInterval(checkHit);
+      }
+    }, 30);
+
+    setTimeout(() => {
+      drop.remove();
+      clearInterval(checkHit);
+    }, dropSpeed);
+  }
+
+  function endGame() {
+    finalScoreEl.textContent = `You caught ${score} drops of clean water.`;
+    modal.style.display = "flex";
+    playGameOverSound();
+  }
+
+  function closeModal() {
+    modal.style.display = "none";
+  }
+</script>
+
+<footer>
+  <a class="donate-btn" href="https://www.charitywater.org" target="_blank" rel="noopener">Learn more / Donate to charity: water</a>
+</footer>
+
+</body>
+</html>
